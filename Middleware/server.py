@@ -418,14 +418,14 @@ def create_payment(u):
     
     # Pricing Configuration
     if plan == 'infantry':
-        amount = 10.0
-        coins = 100
+        amount = 5.0
+        coins = 500
     elif plan == 'commander':
-        amount = 25.0
-        coins = 300
+        amount = 10.0
+        coins = 2000
     else:
         return jsonify({'error': 'Invalid Plan'}), 400
-        
+       
     try:
         # Create Invoice
         # Metadata is CRITICAL for the webhook to know who to credit
@@ -498,8 +498,8 @@ def btcpay_webhook():
                 # Referral Commission (10%)
                 if referrer and referrer != 'null':
                     commission = 0
-                    if plan == 'infantry': commission = 1.0 # 10% of $10
-                    if plan == 'commander': commission = 2.5 # 10% of $25
+                    if plan == 'infantry': commission = 0.5 # 10% of $5
+                    if plan == 'commander': commission = 1.0 # 10% of $10
                     
                     users_collection.update_one(
                         {"username": referrer},
@@ -756,11 +756,11 @@ def subscribe(u):
     coins_to_add = 0
     price = 0.0
     if plan == 'infantry': 
-        coins_to_add = 1000
-        price = 4.99
+        coins_to_add = 500
+        price = 5.00
     if plan == 'commander': 
-        coins_to_add = 10000
-        price = 9.99
+        coins_to_add = 2000
+        price = 10.00
     
     # Update User
     users_collection.update_one(

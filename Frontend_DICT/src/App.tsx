@@ -26,7 +26,8 @@ import {
   HandThumbUpIcon,
   HandThumbDownIcon,
   ChatBubbleLeftEllipsisIcon,
-  CurrencyDollarIcon
+  CurrencyDollarIcon,
+  ShareIcon
 } from '@heroicons/react/24/solid';
 const ConfirmationModal = React.lazy(() => import('./components/ConfirmationModal'));
 const AdminDashboard = React.lazy(() => import('./components/AdminDashboard'));
@@ -34,6 +35,8 @@ const SubscriptionModal = React.lazy(() => import('./components/SubscriptionModa
 const ReferralModal = React.lazy(() => import('./components/ReferralModal'));
 const StatusModal = React.lazy(() => import('./components/StatusModal'));
 const LoadingScreen = React.lazy(() => import('./components/LoadingScreen'));
+const DonationModal = React.lazy(() => import('./components/DonationModal')); // New Import
+import SocialShareModal from './components/SocialShareModal'; // New Import
 
 import { chatWithDictator, ChatMessage } from './services/gemini';
 import { db, User, StoredSession } from './services/db';
@@ -199,6 +202,7 @@ const App: React.FC = () => {
   const [showMobileConfig, setShowMobileConfig] = useState(false);
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
   const [showReferralModal, setShowReferralModal] = useState(false);
+  const [showDonationModal, setShowDonationModal] = useState(false); // Donation State
   const [showAdminPanel, setShowAdminPanel] = useState(false);
 
   const [pendingPlan, setPendingPlan] = useState<string | null>(null);
@@ -213,6 +217,10 @@ const App: React.FC = () => {
 
   // Feedback State
   const [activeFeedbackMsgId, setActiveFeedbackMsgId] = useState<string | null>(null); // Msg ID where text box is open
+
+  // Share State
+  const [shareData, setShareData] = useState<{ open: boolean; userText: string; aiText: string; leaderName: string; leaderAvatar: string; style: string; audioUrl?: string } | null>(null);
+
 
 
   // Refs
@@ -614,15 +622,32 @@ const App: React.FC = () => {
       );
 
       // Final Update (Ensure consistency)
-      const finalMessages = [...updatedMessages, {
+      // FIX: Use backend-provided IDs if available to ensure Feedback works (Likes/Comments)
+      const finalAiId = response.aiMsgId || aiMsgId;
+
+      const finalAiMsg = {
         ...aiMsg,
+        id: finalAiId,
         parts: [{ text: response.text }],
         audioUrl: response.media?.audio_url
-      }];
+      };
+
+      // Also update User Message ID if provided by backend (for consistency)
+      let finalUserMsgs = updatedMessages;
+      if (response.userMsgId) {
+        // The user message is the last one in updatedMessages
+        const lastIndex = updatedMessages.length - 1;
+        if (lastIndex >= 0) {
+          finalUserMsgs = [
+            ...updatedMessages.slice(0, lastIndex),
+            { ...updatedMessages[lastIndex], id: response.userMsgId }
+          ];
+        }
+      }
 
       setSessions(prev => prev.map(session => {
         if (session.id === activeSessionId) {
-          return { ...session, messages: finalMessages };
+          return { ...session, messages: [...finalUserMsgs, finalAiMsg] };
         }
         return session;
       }));
@@ -713,15 +738,28 @@ const App: React.FC = () => {
 
     try {
       // We need to resend the existing feedback type (like/dislike) if it exists, or handle it in backend
-      // For simplicity, let's look up the message
+      // Lookup the message to get current state
       const msg = sessions.find(s => s.id === currentSessionId)?.messages.find(m => m.id === msgId);
-      if (msg && msg.feedback) {
-        await db.submitFeedback(currentSessionId, msgId, msg.feedback, text);
-      }
+
+      // FIX: Always submit text, even if feedback (like/dislike) is not set yet
+      await db.submitFeedback(currentSessionId, msgId, msg?.feedback, text);
     } catch (e) {
       console.error("Feedback text failed", e);
     }
     setActiveFeedbackMsgId(null);
+  };
+
+  // Helper: Open Share Modal
+  const handleOpenShare = (userMsg: ChatMessage, aiMsg: ChatMessage) => {
+    setShareData({
+      open: true,
+      userText: userMsg.parts[0].text,
+      aiText: aiMsg.parts[0].text,
+      leaderName: selectedLeader.name,
+      leaderAvatar: getLeaderAvatarUrl(selectedLeader, selectedStyle),
+      style: selectedStyle,
+      audioUrl: aiMsg.audioUrl
+    });
   };
 
   // ... inside App component ...
@@ -818,6 +856,14 @@ const App: React.FC = () => {
           >
             <CurrencyDollarIcon className="w-4 h-4" />
             <span>Refer & Earn</span>
+          </button>
+
+          <button
+            onClick={() => setShowDonationModal(true)}
+            className="flex items-center gap-3 px-4 py-3 text-sm text-zinc-400 hover:text-amber-400 transition-colors uppercase tracking-widest font-bold border-l-2 border-transparent hover:border-amber-500 hover:bg-zinc-900/50 mb-2"
+          >
+            <CurrencyDollarIcon className="w-4 h-4" />
+            <span>Donate</span>
           </button>
 
           <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
@@ -1030,6 +1076,8 @@ const App: React.FC = () => {
                 </button>
               )}
 
+
+
               {/* 2. CONTROLS (Row below counter) */}
               <div className="flex flex-wrap justify-end gap-2 w-full md:w-auto">
                 <div className="bg-black/80 border border-zinc-600 p-0.5 flex items-center backdrop-blur-md shadow-sm rounded-sm">
@@ -1216,6 +1264,17 @@ const App: React.FC = () => {
 
                               <div className="whitespace-pre-wrap">{msg.parts[0].text}</div>
 
+
+                              {/* AUDIO LOADING STATE (Transmitting...) */}
+                              {isAi && !msg.audioUrl && currentUser?.subscription !== 'free' && isTyping && idx === currentMessages.length - 1 && (
+                                <div className="flex items-center gap-2 mt-3 pt-2 self-start animate-pulse border-t border-white/5 opacity-90">
+                                  <div className="w-3 h-3 border-2 border-red-900 border-t-red-600 rounded-full animate-spin"></div>
+                                  <span className="text-[10px] uppercase font-mono tracking-widest text-red-600 font-bold">
+                                    Audio Signal Incoming...
+                                  </span>
+                                </div>
+                              )}
+
                               {/* AUDIO PLAYER (Infantry/Commander) */}
                               {isAi && msg.audioUrl && (
                                 <VoicePlayer src={msg.audioUrl} />
@@ -1244,6 +1303,20 @@ const App: React.FC = () => {
                                     title="Submit Report"
                                   >
                                     <ChatBubbleLeftEllipsisIcon className="w-5 h-5" />
+                                  </button>
+                                  {/* Share Button */}
+                                  <button
+                                    onClick={() => {
+                                      const msgIndex = currentMessages.findIndex(m => m.id === msg.id);
+                                      const prevMsg = msgIndex > 0 ? currentMessages[msgIndex - 1] : null;
+                                      if (prevMsg && prevMsg.role === 'user') {
+                                        handleOpenShare(prevMsg, msg);
+                                      }
+                                    }}
+                                    className="hover:text-zinc-300 transition-colors"
+                                    title="Share Transmission"
+                                  >
+                                    <ShareIcon className="w-5 h-5" />
                                   </button>
                                 </div>
                               )}
@@ -1409,6 +1482,43 @@ const App: React.FC = () => {
         </div >
 
       </div >
+
+      {/* Donation Modal */}
+      <React.Suspense fallback={null}>
+        <DonationModal
+          isOpen={showDonationModal}
+          onClose={() => setShowDonationModal(false)}
+          onPaymentInit={(url) => {
+            setShowDonationModal(false);
+            setStatusModal({
+              open: true,
+              title: 'Secure Transaction',
+              message: 'Redirecting to payment gateway...',
+              type: 'success'
+            });
+            setTimeout(() => window.location.href = url, 1500);
+          }}
+          onError={(msg) => {
+            setStatusModal({
+              open: true,
+              title: 'Transaction Failed',
+              message: msg,
+              type: 'error'
+            });
+          }}
+        />
+      </React.Suspense>
+
+      {/* Social Share Modal */}
+      {
+        shareData && (
+          <SocialShareModal
+            isOpen={shareData.open}
+            onClose={() => setShareData(null)}
+            data={shareData}
+          />
+        )
+      }
     </div >
   );
 };

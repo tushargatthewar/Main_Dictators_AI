@@ -1,28 +1,20 @@
-# Middleware Deployment (Render)
+# Frontend Deployment (Vercel/Netlify)
 
-This folder contains the Flask Middleware (`server.py`) which manages users, payments, and connects to the GPU Node.
+This folder contains the React application. 
 
-**Host**: Render.com (Web Service)
+**Recommended Host**: Vercel (Fastest & Easiest) or Netlify.
 
-## 1. Setup on Render
-1.  **New Web Service**.
-2.  **Repo**: Select your GitHub repo.
-3.  **Root Directory**: `middleware` (Important!)
-4.  **Runtime**: Python 3.
-5.  **Build Command**: `./render-build.sh` (or `pip install -r requirements.txt`)
-6.  **Start Command**: `gunicorn server:app`
+## Option A: Deploy to Vercel (Recommended)
+1.  Push this code to GitHub.
+2.  Go to [Vercel](https://vercel.com).
+3.  Click **"Add New Project"** -> **"Import"** your repository.
+4.  **Root Directory**: Click "Edit" and select `frontend`.
+5.  **Build Command**: `npm run build`
+6.  **Output Directory**: `dist`
+7.  **Environment Variables**:
+    *   `VITE_API_URL`: Set this to your Render Middleware URL (e.g., `https://dictator-ai-middleware.onrender.com`).
+    *   *Note*: You need to update `App.tsx` to use `import.meta.env.VITE_API_URL` instead of relative paths if you do this separation!
 
-## 2. Environment Variables
-Add these in the Render Dashboard:
-
-| Key | Value |
-| --- | --- |
-| `PYTHON_VERSION` | `3.11.0` |
-| `GPU_NODE_URL` | `http://[VAST_IP]:[PORT]/generate_stream` (e.g. `http://152.x.x.x:6000/generate_stream`) |
-| `SECRET_KEY` | [Generate a random strong string] |
-| `MONGO_URI` | [Your MongoDB Connection String] |
-
-## 3. Important Note
-*   This Middleware is now an **API Only** server.
-*   It does **NOT** serve the Frontend files.
-*   You do **NOT** need a `dist` folder here.
+> [!IMPORTANT]
+> **Do I need to upload the `dist` folder?**
+> **NO.** You do NOT need to create or upload the `dist` folder manually. Vercel will run `npm run build` on their servers and generate it automatically.

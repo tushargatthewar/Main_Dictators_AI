@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db, User, StoredSession } from '../services/db';
-import { XMarkIcon, EyeIcon, UserGroupIcon, CurrencyDollarIcon, ShieldCheckIcon, HandThumbUpIcon, HandThumbDownIcon } from '@heroicons/react/24/solid';
+import { XMarkIcon, EyeIcon, UserGroupIcon, CurrencyDollarIcon, ShieldCheckIcon, HandThumbUpIcon, HandThumbDownIcon, CommandLineIcon } from '@heroicons/react/24/solid';
 
 interface AdminDashboardProps {
     onClose: () => void;
@@ -12,24 +12,95 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
     const [userChats, setUserChats] = useState<StoredSession[]>([]);
     const [payouts, setPayouts] = useState<any[]>([]);
-    const [activeTab, setActiveTab] = useState<'activity' | 'commissions'>('activity');
+    const [donations, setDonations] = useState<any[]>([]);
+    const [transactions, setTransactions] = useState<any[]>([]); // New State
+    const [activeTab, setActiveTab] = useState<'activity' | 'commissions' | 'donations' | 'financials' | 'logs'>('activity');
     const [loading, setLoading] = useState(true);
+
+    // Logs State
+    const [logs, setLogs] = useState<string[]>([]);
+    const [logSource, setLogSource] = useState<'gpu' | 'llm' | 'tunnel'>('gpu');
+    const [isLogStreaming, setIsLogStreaming] = useState(false);
 
     useEffect(() => {
         loadData();
     }, []);
 
+    // --- LOG STREAMING EFFECT ---
+    useEffect(() => {
+        let eventSource: EventSource | null = null;
+
+        if (activeTab === 'logs') {
+            setLogs([]); // Clear on switch
+            setIsLogStreaming(true);
+            const token = localStorage.getItem('dictator_token');
+            const baseUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000";
+
+            // Use EventSourcePolyfill if headers needed, or pass via URL param if backend supports it.
+            // But standard EventSource doesn't support headers easily.
+            // Alternative: Fetch loop or use library. 
+            // SIMPLIFICATION: We'll assume the backend checks cookie or we pass token in URL.
+            // Since we implemented 'token_required', we need to pass it.
+            // Standard EventSource can't pass Authorization header.
+            // FIX: We will rely on a fetching loop for now OR use a library.
+            // ACTUALLY: Let's use `fetch` with a `ReadableStream` reader (like the chat) instead of EventSource
+            // because we already have that logic working for Chat! 
+
+            const startStream = async () => {
+                try {
+                    const response = await fetch(`${baseUrl}/api/admin/logs?source=${logSource}`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+
+                    if (!response.body) return;
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        const chunk = decoder.decode(value);
+                        // Parse SSE lines "data: ..."
+                        const lines = chunk.split('\n');
+                        for (const line of lines) {
+                            if (line.startsWith('data: ')) {
+                                const text = line.slice(6);
+                                setLogs(prev => [...prev.slice(-199), text]); // Keep last 200 lines
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error("Log Stream Error", e);
+                    setLogs(prev => [...prev, "--- CONNECTION INTERRUPTED ---"]);
+                } finally {
+                    setIsLogStreaming(false);
+                }
+            };
+
+            startStream();
+
+            return () => {
+                // Ideally cancel fetch, but simple implementation: just let it die or component unmount
+                // In a real app we'd use AbortController
+            };
+        }
+    }, [activeTab, logSource]);
+
     const loadData = async () => {
         setLoading(true);
         try {
-            const [statsData, usersData, payoutsData] = await Promise.all([
+            const [statsData, usersData, payoutsData, donationsData, transactionsData] = await Promise.all([
                 db.getAdminStats(),
                 db.getAdminUsers(),
-                db.getAdminPayouts()
+                db.getAdminPayouts(),
+                db.getAdminDonations(),
+                db.getAdminTransactions()
             ]);
             setStats(statsData);
             setUsers(usersData);
             setPayouts(payoutsData.filter((p: any) => p.status === 'pending'));
+            setDonations(donationsData);
+            setTransactions(transactionsData);
         } catch (e) {
             console.error("Admin Load Error", e);
         } finally {
@@ -115,6 +186,25 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                     Commission Requests
                     {payouts.length > 0 && <span className="bg-amber-500 text-black text-[10px] px-1.5 rounded-full">{payouts.length}</span>}
                 </button>
+                <button
+                    onClick={() => setActiveTab('donations')}
+                    className={`pb-2 px-4 text-sm font-bold uppercase tracking-wider transition-all border-b-2 flex items-center gap-2 ${activeTab === 'donations' ? 'text-emerald-500 border-emerald-500' : 'text-zinc-500 border-transparent hover:text-zinc-300'}`}
+                >
+                    Donation Ledger
+                </button>
+                <button
+                    onClick={() => setActiveTab('financials')}
+                    className={`pb-2 px-4 text-sm font-bold uppercase tracking-wider transition-all border-b-2 flex items-center gap-2 ${activeTab === 'financials' ? 'text-blue-500 border-blue-500' : 'text-zinc-500 border-transparent hover:text-zinc-300'}`}
+                >
+                    Transaction History
+                </button>
+                <button
+                    onClick={() => setActiveTab('logs')}
+                    className={`pb-2 px-4 text-sm font-bold uppercase tracking-wider transition-all border-b-2 flex items-center gap-2 ${activeTab === 'logs' ? 'text-green-500 border-green-500' : 'text-zinc-500 border-transparent hover:text-zinc-300'}`}
+                >
+                    <CommandLineIcon className="w-4 h-4" />
+                    System Logs
+                </button>
             </div>
 
             {loading ? (
@@ -126,6 +216,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                     {/* TAB 1: ACTIVITY */}
                     {activeTab === 'activity' && (
                         <div className="flex-1 flex flex-col md:flex-row gap-6 md:overflow-hidden min-h-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                            {/* ... Content ... */}
                             {/* LEFT PANEL: STATS & USERS */}
                             <div className="flex-1 flex flex-col gap-6 md:overflow-hidden shrink-0">
                                 {/* ... Stats Row ... */}
@@ -263,15 +354,32 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                                                             <div key={idx} className={`flex ${msg.role === 'model' ? 'justify-end' : 'justify-start'}`}>
                                                                 <div className={`max-w-[80%] text-xs font-mono p-2 rounded-sm flex flex-col gap-1 ${msg.role === 'model' ? 'bg-zinc-900 text-zinc-400 border border-zinc-800' : 'bg-zinc-800/50 text-zinc-300'}`}>
                                                                     <div>{msg.parts[0].text}</div>
+
+                                                                    {/* Audio Playback */}
+                                                                    {msg.audioUrl && (
+                                                                        <div className="mt-2">
+                                                                            <audio
+                                                                                controls
+                                                                                src={msg.audioUrl}
+                                                                                className="w-full h-8 opacity-70 hover:opacity-100 transition-opacity"
+                                                                            />
+                                                                        </div>
+                                                                    )}
+
                                                                     {/* Feedback Display */}
                                                                     {msg.role === 'model' && (msg.feedback || msg.feedbackText) && (
-                                                                        <div className="mt-2 pt-2 border-t border-zinc-800 flex flex-col gap-1">
-                                                                            <div className="flex items-center gap-2">
-                                                                                {msg.feedback === 'like' && <div className="flex items-center gap-1 text-amber-600"><HandThumbUpIcon className="w-3 h-3" /><span className="text-[9px] uppercase">Commended</span></div>}
-                                                                                {msg.feedback === 'dislike' && <div className="flex items-center gap-1 text-red-600"><HandThumbDownIcon className="w-3 h-3" /><span className="text-[9px] uppercase">Reported</span></div>}
+                                                                        <div className="mt-3 pt-2 border-t border-zinc-800 flex flex-col gap-2">
+                                                                            <div className="flex items-center justify-between">
+                                                                                <div className="flex items-center gap-2">
+                                                                                    {msg.feedback === 'like' && <div className="flex items-center gap-1 text-emerald-500 font-bold uppercase tracking-wider text-[10px]"><HandThumbUpIcon className="w-4 h-4" /> Commended</div>}
+                                                                                    {msg.feedback === 'dislike' && <div className="flex items-center gap-1 text-red-500 font-bold uppercase tracking-wider text-[10px]"><HandThumbDownIcon className="w-4 h-4" /> Reported</div>}
+                                                                                </div>
                                                                             </div>
+
+                                                                            {/* Prominent Comment Box */}
                                                                             {msg.feedbackText && (
-                                                                                <div className="text-[11px] text-zinc-300 italic bg-zinc-800/80 border border-zinc-700 p-2 rounded mt-1 shadow-sm">
+                                                                                <div className="bg-zinc-800 border-l-2 border-white pl-3 py-2 pr-2 rounded-r text-zinc-200 text-xs font-sans leading-relaxed shadow-sm">
+                                                                                    <span className="text-[9px] text-zinc-500 uppercase font-bold block mb-1">Attached Comment:</span>
                                                                                     "{msg.feedbackText}"
                                                                                 </div>
                                                                             )}
@@ -286,6 +394,48 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                                         </div>
                                     </>
                                 )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* TAB 5: LOGS */}
+                    {activeTab === 'logs' && (
+                        <div className="flex-1 flex flex-col gap-6 md:overflow-hidden min-h-0 animate-in fade-in slide-in-from-right-2 duration-300">
+                            <div className="bg-[#0c0c0c] border border-zinc-800 rounded-sm overflow-hidden flex flex-col flex-1 shadow-2xl font-mono">
+
+                                {/* Controls */}
+                                <div className="p-3 bg-zinc-900/80 border-b border-zinc-800 flex gap-4 items-center">
+                                    <div className="text-xs font-bold text-green-500 uppercase tracking-widest flex items-center gap-2">
+                                        <CommandLineIcon className="w-4 h-4" />
+                                        LIVE TERMINAL
+                                    </div>
+                                    <div className="h-4 w-[1px] bg-zinc-700"></div>
+                                    <div className="flex gap-2">
+                                        {(['gpu', 'llm', 'tunnel'] as const).map(src => (
+                                            <button
+                                                key={src}
+                                                onClick={() => setLogSource(src)}
+                                                className={`text-[10px] uppercase font-bold px-3 py-1 rounded transition-colors
+                                                    ${logSource === src ? 'bg-zinc-700 text-white' : 'bg-black/40 text-zinc-500 hover:text-zinc-300'}
+                                                `}
+                                            >
+                                                {src === 'gpu' ? 'GPU NODE' : src === 'llm' ? 'LLM SERVER' : 'TUNNEL'}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    {isLogStreaming && <span className="ml-auto text-[10px] text-green-500 animate-pulse">● STREAMING</span>}
+                                </div>
+
+                                {/* Terminal Window */}
+                                <div className="flex-1 p-4 overflow-y-auto custom-scrollbar bg-black text-xs space-y-1">
+                                    {logs.map((line, idx) => (
+                                        <div key={idx} className="whitespace-pre-wrap break-all text-zinc-400 font-mono hover:bg-white/5 hover:text-zinc-200 transition-colors">
+                                            <span className="text-zinc-700 select-none mr-2">{(idx + 1).toString().padStart(3, '0')}</span>
+                                            {line}
+                                        </div>
+                                    ))}
+                                    <div ref={el => el?.scrollIntoView({ behavior: 'smooth' })}></div>
+                                </div>
                             </div>
                         </div>
                     )}
@@ -336,6 +486,105 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                                             </div>
                                         ))
                                     )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* TAB 3: DONATIONS */}
+                    {activeTab === 'donations' && (
+                        <div className="flex-1 flex flex-col gap-6 md:overflow-hidden min-h-0 animate-in fade-in slide-in-from-right-2 duration-300">
+                            <div className="bg-zinc-900/50 border border-zinc-800 rounded-sm overflow-hidden flex flex-col flex-1 shadow-2xl">
+                                <div className="p-4 bg-zinc-900 border-b border-zinc-800 text-sm font-bold text-emerald-500 uppercase tracking-wider flex justify-between items-center">
+                                    <div className="flex items-center gap-3">
+                                        <CurrencyDollarIcon className="w-5 h-5" />
+                                        Donation History
+                                    </div>
+                                    <span className="text-zinc-500 text-xs font-mono">TOTAL RECORDS: {donations.length}</span>
+                                </div>
+                                <div className="flex-1 overflow-y-auto custom-scrollbar">
+                                    <table className="w-full text-left border-collapse">
+                                        <thead className="bg-zinc-900 sticky top-0 z-10 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                                            <tr>
+                                                <th className="p-4 border-b border-zinc-800">Date</th>
+                                                <th className="p-4 border-b border-zinc-800">Agent</th>
+                                                <th className="p-4 border-b border-zinc-800 text-right">Amount (USD)</th>
+                                                <th className="p-4 border-b border-zinc-800 text-right">Coins Issued</th>
+                                                <th className="p-4 border-b border-zinc-800 text-right">Invoice ID</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="text-xs font-mono text-zinc-400">
+                                            {donations.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={5} className="p-8 text-center text-zinc-600 italic">No donations recorded yet.</td>
+                                                </tr>
+                                            ) : (
+                                                donations.map((d, i) => (
+                                                    <tr key={i} className="border-b border-zinc-800/50 hover:bg-zinc-900/50 transition-colors">
+                                                        <td className="p-4 text-zinc-500">{new Date(d.date).toLocaleString()}</td>
+                                                        <td className="p-4 font-bold text-white">{d.username}</td>
+                                                        <td className="p-4 text-right text-emerald-500 font-bold">${(d.amount || 0).toFixed(2)}</td>
+                                                        <td className="p-4 text-right text-amber-500 font-bold">{d.coins}</td>
+                                                        <td className="p-4 text-right text-zinc-600 font-mono text-[10px]">{d.id}</td>
+                                                    </tr>
+                                                ))
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* TAB 4: FINANCIALS (TRANSACTIONS) */}
+                    {activeTab === 'financials' && (
+                        <div className="flex-1 flex flex-col gap-6 md:overflow-hidden min-h-0 animate-in fade-in slide-in-from-right-2 duration-300">
+                            <div className="bg-zinc-900/50 border border-zinc-800 rounded-sm overflow-hidden flex flex-col flex-1 shadow-2xl">
+                                <div className="p-4 bg-zinc-900 border-b border-zinc-800 text-sm font-bold text-blue-500 uppercase tracking-wider flex justify-between items-center">
+                                    <div className="flex items-center gap-3">
+                                        <CurrencyDollarIcon className="w-5 h-5" />
+                                        Financial Ledger (In/Out)
+                                    </div>
+                                    <span className="text-zinc-500 text-xs font-mono">TOTAL RECORDS: {transactions.length}</span>
+                                </div>
+                                <div className="flex-1 overflow-y-auto custom-scrollbar">
+                                    <table className="w-full text-left border-collapse">
+                                        <thead className="bg-zinc-900 sticky top-0 z-10 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                                            <tr>
+                                                <th className="p-4 border-b border-zinc-800">Date Logged</th>
+                                                <th className="p-4 border-b border-zinc-800">Transaction Label</th>
+                                                <th className="p-4 border-b border-zinc-800 text-center">Type</th>
+                                                <th className="p-4 border-b border-zinc-800 text-right">Amount (USD)</th>
+                                                <th className="p-4 border-b border-zinc-800 text-center">Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="text-xs font-mono text-zinc-400">
+                                            {transactions.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={5} className="p-8 text-center text-zinc-600 italic">No transactions recorded.</td>
+                                                </tr>
+                                            ) : (
+                                                transactions.map((t: any, i: number) => (
+                                                    <tr key={i} className="border-b border-zinc-800/50 hover:bg-zinc-900/50 transition-colors">
+                                                        <td className="p-4 text-zinc-500">{new Date(t.date).toLocaleString()}</td>
+                                                        <td className="p-4 font-bold text-white">{t.label}</td>
+                                                        <td className="p-4 text-center">
+                                                            <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${t.type === 'credit' ? 'bg-emerald-950/30 text-emerald-500 border border-emerald-900/50' : 'bg-red-950/30 text-red-500 border border-red-900/50'
+                                                                }`}>
+                                                                {t.type === 'credit' ? 'INCOME' : 'EXPENSE'}
+                                                            </span>
+                                                        </td>
+                                                        <td className={`p-4 text-right font-bold ${t.type === 'credit' ? 'text-emerald-400' : 'text-red-400'}`}>
+                                                            {t.type === 'credit' ? '+' : '-'}${Number(t.amount).toFixed(2)}
+                                                        </td>
+                                                        <td className="p-4 text-center">
+                                                            <span className="text-zinc-500 uppercase text-[9px] border border-zinc-800 px-1 rounded">{t.status}</span>
+                                                        </td>
+                                                    </tr>
+                                                ))
+                                            )}
+                                        </tbody>
+                                    </table>
                                 </div>
                             </div>
                         </div>

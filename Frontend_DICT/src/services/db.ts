@@ -32,12 +32,12 @@ const API_BASE = import.meta.env.VITE_API_URL || "VITE_API_URL";
 
 export const db = {
   // --- AUTHENTICATION ---
-  async signup(username: string, accessCode: string): Promise<User> {
+  async signup(email: string, accessCode: string): Promise<User> {
     const refCode = localStorage.getItem('dictator_ref');
     const response = await fetch(`${API_BASE}/api/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password: accessCode, referral_code: refCode })
+      body: JSON.stringify({ email, password: accessCode, referral_code: refCode })
     });
 
     const text = await response.text();
@@ -57,11 +57,37 @@ export const db = {
     return data;
   },
 
-  async login(username: string, accessCode: string, loginType: 'user' | 'admin' = 'user'): Promise<User> {
+  async googleLogin(credential: string): Promise<User> {
+    const response = await fetch(`${API_BASE}/api/google-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: credential })
+    });
+
+    const text = await response.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      console.error("Non-JSON response:", text.slice(0, 100));
+      throw new Error(`Server Error (Invalid JSON): ${text.slice(0, 50)}...`);
+    }
+
+    if (!response.ok) {
+      throw new Error(data.error || "Google Login Failed");
+    }
+    localStorage.setItem('dictator_user_id', data.id);
+    localStorage.setItem('dictator_token', data.token);
+    return data;
+  },
+
+  async login(email: string, accessCode: string, loginType: 'user' | 'admin' = 'user'): Promise<User> {
     const response = await fetch(`${API_BASE}/api/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password: accessCode, login_type: loginType })
+      // Send as 'email' principally, but server accepts 'username' too if valid.
+      // We label it 'email' from the frontend now.
+      body: JSON.stringify({ email, password: accessCode, login_type: loginType })
     });
 
     const text = await response.text();
@@ -79,6 +105,34 @@ export const db = {
     localStorage.setItem('dictator_user_id', data.id);
     localStorage.setItem('dictator_token', data.token); // Store Token
     return data;
+  },
+
+  async forgotPassword(email: string): Promise<string> {
+    const response = await fetch(`${API_BASE}/api/forgot-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || 'Request Failed');
+    }
+    return data.message;
+  },
+
+  async resetPassword(email: string, oldPass: string, newPass: string): Promise<string> {
+    const response = await fetch(`${API_BASE}/api/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, old_password: oldPass, new_password: newPass })
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || 'Reset Failed');
+    }
+    return data.message;
   },
 
   async getCurrentUser(): Promise<User | null> {
@@ -176,6 +230,22 @@ export const db = {
     return res.json();
   },
 
+  async getAdminDonations() {
+    const token = localStorage.getItem('dictator_token');
+    const res = await fetch(`${API_BASE}/api/admin/donations`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    return res.json();
+  },
+
+  async getAdminTransactions() {
+    const token = localStorage.getItem('dictator_token');
+    const res = await fetch(`${API_BASE}/api/admin/transactions`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    return res.json();
+  },
+
   async confirmPayout(payoutId: string, proof: string) {
     const token = localStorage.getItem('dictator_token');
     const res = await fetch(`${API_BASE}/api/admin/payouts/${payoutId}/pay`, {
@@ -190,7 +260,7 @@ export const db = {
   },
 
   // --- FEEDBACK ---
-  async submitFeedback(sessionId: string, messageId: string, feedback: 'like' | 'dislike', feedbackText?: string) {
+  async submitFeedback(sessionId: string, messageId: string, feedback?: 'like' | 'dislike', feedbackText?: string) {
     const token = localStorage.getItem('dictator_token');
     const response = await fetch(`${API_BASE}/api/feedback`, {
       method: 'POST',
@@ -206,7 +276,7 @@ export const db = {
   },
 
   // --- SUBSCRIPTIONS ---
-  async createPayment(plan: 'infantry' | 'commander') {
+  async createPayment(plan: 'infantry' | 'commander' | 'donation', amount?: number) {
     const token = localStorage.getItem('dictator_token');
     const response = await fetch(`${API_BASE}/api/create-payment`, {
       method: 'POST',
@@ -214,7 +284,7 @@ export const db = {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
       },
-      body: JSON.stringify({ plan })
+      body: JSON.stringify({ plan, amount })
     });
 
     if (!response.ok) {

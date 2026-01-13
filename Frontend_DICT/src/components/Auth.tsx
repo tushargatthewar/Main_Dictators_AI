@@ -5,6 +5,7 @@
  */
 import React, { useState } from 'react';
 import { LockClosedIcon, FingerPrintIcon, UserIcon, ShieldCheckIcon, UserGroupIcon, CommandLineIcon } from '@heroicons/react/24/solid';
+import { GoogleLogin } from '@react-oauth/google';
 import { db, User } from '../services/db';
 
 interface AuthProps {
@@ -15,22 +16,25 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
     // Tabs: 'user' | 'admin'
     const [activeTab, setActiveTab] = useState<'user' | 'admin'>('user');
 
-    // User View: 'login' | 'signup'
-    const [userView, setUserView] = useState<'login' | 'signup'>('login');
+    // User View: 'login' | 'signup' | 'forgot' | 'reset'
+    const [userView, setUserView] = useState<'login' | 'signup' | 'forgot' | 'reset'>('login');
 
-    const [username, setUsername] = useState('');
+    const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [newPassword, setNewPassword] = useState(''); // Only for reset
 
     // Admin specific state
     const [adminUser, setAdminUser] = useState('');
     const [adminPass, setAdminPass] = useState('');
 
     const [error, setError] = useState<string | null>(null);
+    const [successMsg, setSuccessMsg] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError(null);
+        setSuccessMsg(null);
         setIsLoading(true);
 
         try {
@@ -42,18 +46,49 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                 }
                 onLogin(user);
             } else {
-                // User Login/Signup
+                // User Login/Signup/Forgot/Reset
                 if (userView === 'login') {
-                    const user = await db.login(username, password, 'user');
+                    const user = await db.login(email, password, 'user');
                     onLogin(user);
-                } else {
-                    const user = await db.signup(username, password);
+                } else if (userView === 'signup') {
+                    const user = await db.signup(email, password);
                     onLogin(user);
+                } else if (userView === 'forgot') {
+                    const msg = await db.forgotPassword(email);
+                    setSuccessMsg(msg);
+                    setIsLoading(false);
+                    return;
+                } else if (userView === 'reset') {
+                    const msg = await db.resetPassword(email, password, newPassword);
+                    setSuccessMsg(msg);
+                    // Optional: Auto-login or just stay on success and let user go to login
+                    setTimeout(() => {
+                        setIsLoading(false);
+                        setUserView('login');
+                        setSuccessMsg("Password updated. Please login with new credentials.");
+                        setPassword(''); // Clear old pass
+                    }, 1500);
                 }
             }
         } catch (err: any) {
             setError(err.message || "AUTHENTICATION_FAILED");
+            setIsLoading(false); // Fix: Stop loading on error
         } finally {
+            // Only auto-stop loading for non-special views (login/signup/admin)
+            // 'forgot' and 'reset' handles their own loading state on success
+            if (userView !== 'forgot' && userView !== 'reset') setIsLoading(false);
+        }
+    };
+
+    const handleGoogleSuccess = async (credentialResponse: any) => {
+        setIsLoading(true);
+        try {
+            if (credentialResponse.credential) {
+                const user = await db.googleLogin(credentialResponse.credential);
+                onLogin(user);
+            }
+        } catch (err: any) {
+            setError(err.message || "Google Login Failed");
             setIsLoading(false);
         }
     };
@@ -92,13 +127,13 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                     {/* TABS */}
                     <div className="flex border-b border-zinc-800 bg-zinc-950/50">
                         <button
-                            onClick={() => { setActiveTab('user'); setError(null); }}
+                            onClick={() => { setActiveTab('user'); setError(null); setSuccessMsg(null); setUserView('login'); }}
                             className={`flex-1 py-3 text-xs uppercase tracking-widest font-bold flex items-center justify-center gap-2 transition-colors ${activeTab === 'user' ? 'bg-[#121212] text-white border-t-2 border-red-600' : 'text-zinc-600 hover:text-zinc-400'}`}
                         >
                             <UserGroupIcon className="w-4 h-4" /> Agent Access
                         </button>
                         <button
-                            onClick={() => { setActiveTab('admin'); setError(null); }}
+                            onClick={() => { setActiveTab('admin'); setError(null); setSuccessMsg(null); }}
                             className={`flex-1 py-3 text-xs uppercase tracking-widest font-bold flex items-center justify-center gap-2 transition-colors ${activeTab === 'admin' ? 'bg-[#121212] text-red-500 border-t-2 border-red-800' : 'text-zinc-600 hover:text-zinc-400'}`}
                         >
                             <CommandLineIcon className="w-4 h-4" /> High Command
@@ -109,7 +144,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                         {/* Form Title */}
                         <h2 className="text-center text-lg uppercase tracking-[0.2em] font-bold text-zinc-400 mb-8 border-b border-dashed border-zinc-700 pb-4">
                             {activeTab === 'user'
-                                ? (userView === 'login' ? 'Identity Verification' : 'New Agent Registration')
+                                ? (userView === 'login' ? 'Identity Verification' : (userView === 'signup' ? 'New Agent Registration' : (userView === 'forgot' ? 'Credentials Recovery' : 'Update Security Token')))
                                 : 'Restricted Access Protocol'}
                         </h2>
 
@@ -118,31 +153,56 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                                 <>
                                     <div className="space-y-2">
                                         <label className="text-xs uppercase tracking-wider text-red-800 font-bold flex items-center gap-2">
-                                            <UserIcon className="w-3 h-3" /> Agent ID
+                                            <UserIcon className="w-3 h-3" /> Email Address
                                         </label>
                                         <input
-                                            type="text"
+                                            type="email"
                                             required
-                                            value={username}
-                                            onChange={(e) => setUsername(e.target.value)}
+                                            value={email}
+                                            onChange={(e) => setEmail(e.target.value)}
                                             className="w-full bg-black/50 border-b-2 border-zinc-700 focus:border-red-700 px-3 py-2 outline-none transition-colors font-mono text-zinc-200 placeholder-zinc-700"
-                                            placeholder="ENTER CODENAME"
+                                            placeholder="agent@example.com"
                                         />
                                     </div>
 
-                                    <div className="space-y-2">
-                                        <label className="text-xs uppercase tracking-wider text-red-800 font-bold flex items-center gap-2">
-                                            <LockClosedIcon className="w-3 h-3" /> Access Code
-                                        </label>
-                                        <input
-                                            type="password"
-                                            required
-                                            value={password}
-                                            onChange={(e) => setPassword(e.target.value)}
-                                            className="w-full bg-black/50 border-b-2 border-zinc-700 focus:border-red-700 px-3 py-2 outline-none transition-colors font-mono text-zinc-200 placeholder-zinc-700"
-                                            placeholder="••••••••"
-                                        />
-                                    </div>
+                                    {userView !== 'forgot' && (
+                                        <div className="space-y-2">
+                                            <div className="flex justify-between items-center">
+                                                <label className="text-xs uppercase tracking-wider text-red-800 font-bold flex items-center gap-2">
+                                                    <LockClosedIcon className="w-3 h-3" /> {userView === 'reset' ? 'Temporary Passkey' : 'Access Code'}
+                                                </label>
+                                                {userView === 'login' && (
+                                                    <button type='button' onClick={() => setUserView('forgot')} className="text-[9px] text-zinc-500 hover:text-zinc-300 uppercase underline">
+                                                        Start Recovery Protocol
+                                                    </button>
+                                                )}
+                                            </div>
+                                            <input
+                                                type="password"
+                                                required
+                                                value={password}
+                                                onChange={(e) => setPassword(e.target.value)}
+                                                className="w-full bg-black/50 border-b-2 border-zinc-700 focus:border-red-700 px-3 py-2 outline-none transition-colors font-mono text-zinc-200 placeholder-zinc-700"
+                                                placeholder={userView === 'reset' ? "ENTER CODE FROM EMAIL" : "••••••••"}
+                                            />
+                                        </div>
+                                    )}
+
+                                    {userView === 'reset' && (
+                                        <div className="space-y-2">
+                                            <label className="text-xs uppercase tracking-wider text-red-800 font-bold flex items-center gap-2">
+                                                <LockClosedIcon className="w-3 h-3" /> New Access Code
+                                            </label>
+                                            <input
+                                                type="password"
+                                                required
+                                                value={newPassword}
+                                                onChange={(e) => setNewPassword(e.target.value)}
+                                                className="w-full bg-black/50 border-b-2 border-zinc-700 focus:border-red-700 px-3 py-2 outline-none transition-colors font-mono text-zinc-200 placeholder-zinc-700"
+                                                placeholder="NEW SECURE PASSWORD"
+                                            />
+                                        </div>
+                                    )}
                                 </>
                             ) : (
                                 /* ADMIN FORM */
@@ -186,34 +246,82 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                                 </div>
                             )}
 
+                            {successMsg && (
+                                <div className="text-emerald-500 text-xs font-bold bg-emerald-950/20 p-2 border-l-2 border-emerald-600 flex flex-col gap-2">
+                                    <span>{successMsg}</span>
+                                    {userView === 'forgot' && (
+                                        <button
+                                            type="button"
+                                            onClick={() => { setUserView('reset'); setSuccessMsg(null); setPassword(''); }}
+                                            className="bg-emerald-900/50 hover:bg-emerald-800/50 text-emerald-200 text-[10px] py-1 px-2 rounded border border-emerald-700 uppercase tracking-wider transition-colors"
+                                        >
+                                            I have my Passkey - Reset Password
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+
                             <button
                                 type="submit"
                                 disabled={isLoading}
                                 className={`w-full py-3 uppercase tracking-widest font-bold text-sm transition-all duration-300 flex items-center justify-center gap-2 group mt-4 relative overflow-hidden border ${activeTab === 'admin' ? 'bg-red-950 text-red-500 border-red-600 hover:bg-red-900 hover:text-white' : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700 hover:text-white'}`}
                             >
                                 {isLoading ? (
-                                    <span className="animate-pulse">Verifying Credentials...</span>
+                                    <span className="animate-pulse">Processing...</span>
                                 ) : (
                                     <>
-                                        <span>{activeTab === 'admin' ? 'Authorize' : (userView === 'login' ? 'Authenticate' : 'Submit Dossier')}</span>
+                                        <span>{activeTab === 'admin' ? 'Authorize' : (userView === 'login' ? 'Authenticate' : (userView === 'signup' ? 'Submit Dossier' : (userView === 'forgot' ? 'Send Recovery Packet' : 'Update Credentials')))}</span>
                                         <FingerPrintIcon className="w-4 h-4" />
                                     </>
                                 )}
                             </button>
                         </form>
 
+                        {/* Google Login Section - For User Tab (Login & Signup) */}
+                        {activeTab === 'user' && (userView === 'login' || userView === 'signup') && (
+                            <div className="mt-6">
+                                <div className="relative flex items-center py-2 mb-4">
+                                    <div className="flex-grow border-t border-zinc-800"></div>
+                                    <span className="flex-shrink-0 mx-4 text-zinc-600 text-[10px] uppercase tracking-wider font-mono">Secure External Link</span>
+                                    <div className="flex-grow border-t border-zinc-800"></div>
+                                </div>
+                                <div className="flex justify-center w-full">
+                                    <GoogleLogin
+                                        onSuccess={handleGoogleSuccess}
+                                        onError={() => setError("Google Login Failed")}
+                                        theme="filled_black"
+                                        shape="rectangular"
+                                        text={userView === 'signup' ? "signup_with" : "continue_with"}
+                                        width="320"
+                                    />
+                                </div>
+                            </div>
+                        )}
+
                         {/* Switcher only for User Tab */}
                         {activeTab === 'user' && (
-                            <div className="mt-8 text-center">
-                                <button
-                                    onClick={() => {
-                                        setUserView(userView === 'login' ? 'signup' : 'login');
-                                        setError(null);
-                                    }}
-                                    className="text-[10px] uppercase tracking-wider text-zinc-600 hover:text-zinc-400 border-b border-transparent hover:border-zinc-500 transition-colors"
-                                >
-                                    {userView === 'login' ? 'Request New Clearance Level' : 'Return to Login Terminal'}
-                                </button>
+                            <div className="mt-8 text-center flex flex-col gap-2">
+                                {userView === 'login' ? (
+                                    <button
+                                        onClick={() => {
+                                            setUserView('signup');
+                                            setError(null);
+                                        }}
+                                        className="text-[10px] uppercase tracking-wider text-zinc-600 hover:text-zinc-400 border-b border-transparent hover:border-zinc-500 transition-colors"
+                                    >
+                                        No Identification? Apply for Clearance
+                                    </button>
+                                ) : (
+                                    <button
+                                        onClick={() => {
+                                            setUserView('login');
+                                            setError(null);
+                                        }}
+                                        className="text-[10px] uppercase tracking-wider text-zinc-600 hover:text-zinc-400 border-b border-transparent hover:border-zinc-500 transition-colors"
+                                    >
+                                        Return to Login Terminal
+                                    </button>
+                                )}
                             </div>
                         )}
                     </div>

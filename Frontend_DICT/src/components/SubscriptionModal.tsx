@@ -48,7 +48,7 @@ const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ isOpen, onClose, 
     if (confirmingPlan) {
         const isUpgrade = user?.subscription !== 'free';
         const price = confirmingPlan === 'infantry' ? '$4.99' : '$9.99';
-        const coins = confirmingPlan === 'infantry' ? '500' : '2000';
+        const coins = confirmingPlan === 'infantry' ? '100' : '300';
 
         return (
             <div className="fixed inset-0 z-[160] bg-black/95 backdrop-blur-md flex items-center justify-center p-4">
@@ -62,7 +62,7 @@ const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ isOpen, onClose, 
                         ) : (
                             <p>Do you want to buy the <span className="text-red-500 font-bold uppercase">{confirmingPlan}</span> clearance for <span className="text-white font-bold">{price}</span>?</p>
                         )}
-                        <p className="text-xs text-zinc-600">Secure transmission line active. 10% Affiliate commission will be processed.</p>
+                        <p className="text-xs text-zinc-600">Secure transmission line active. 10% Affiliate commission will be processed. Valid for 30 Days.</p>
                     </div>
 
                     <div className="flex gap-4 justify-center">
@@ -130,7 +130,7 @@ const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ isOpen, onClose, 
                     </div>
 
                     {/* Free Tier */}
-                    <div className={`border p-6 rounded-lg bg-zinc-900/50 flex flex-col items-center text-center ${user?.subscription === 'free' ? 'border-zinc-700 opacity-50' : 'border-zinc-800'}`}>
+                    <div className={`border p-6 rounded-lg bg-zinc-900/50 flex flex-col items-center text-center ${user?.subscription === 'free' ? 'border-green-500/50 ring-1 ring-green-500/20' : 'border-zinc-800 opacity-60'}`}>
                         <div className="text-zinc-500 font-bold uppercase mb-2">Conscript</div>
                         <div className="text-3xl font-oswald text-white mb-4">Free</div>
                         <ul className="text-sm text-zinc-400 space-y-2 mb-6 font-mono text-left w-full pl-4">
@@ -140,16 +140,24 @@ const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ isOpen, onClose, 
                             <li className="flex items-center gap-2"><XCircleIcon className="w-4 h-4 text-red-900/40" /> No Voice Response</li>
                             <li className="flex items-center gap-2"><XCircleIcon className="w-4 h-4 text-red-900/40" /> No Avatar Response</li>
                         </ul>
-                        <div className="mt-auto text-xs text-zinc-600 uppercase">Current Status</div>
+                        {user?.subscription === 'free' && (
+                            <div className="mt-auto text-xs text-green-500 font-bold uppercase tracking-widest flex items-center gap-2">
+                                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                                Current Status
+                            </div>
+                        )}
                     </div>
 
                     {/* Infantry Tier */}
-                    <div className="border border-red-900/50 bg-red-950/10 p-6 rounded-lg flex flex-col items-center text-center relative group hover:bg-red-950/20 transition-all cursor-pointer" onClick={() => handleClick('infantry')}>
-                        <div className="absolute top-0 right-0 bg-red-900 text-white text-[10px] px-2 py-0.5 uppercase font-bold">Popular</div>
-                        <div className="text-red-500 font-bold uppercase mb-2 group-hover:text-red-400">Infantry</div>
+                    <div
+                        className={`border  p-6 rounded-lg flex flex-col items-center text-center relative group transition-all ${user?.subscription === 'infantry' ? 'border-green-500/50 bg-green-950/10 ring-1 ring-green-500/20' : 'border-red-900/50 bg-red-950/10 hover:bg-red-950/20 cursor-pointer'}`}
+                        onClick={() => user?.subscription !== 'infantry' && handleClick('infantry')}
+                    >
+                        {!user?.subscription && user?.subscription !== 'infantry' && <div className="absolute top-0 right-0 bg-red-900 text-white text-[10px] px-2 py-0.5 uppercase font-bold">Popular</div>}
+                        <div className={`font-bold uppercase mb-2 ${user?.subscription === 'infantry' ? 'text-green-500' : 'text-red-500 group-hover:text-red-400'}`}>Infantry</div>
                         <div className="text-3xl font-oswald text-white mb-4">$4.99<span className="text-sm text-zinc-500">/mo</span></div>
                         <ul className="text-sm text-zinc-300 space-y-2 mb-6 font-mono text-left w-full pl-4">
-                            <li className="flex items-center gap-2"><CheckIcon className="w-4 h-4 text-red-500" /> 500 KC (~2500 Chats)</li>
+                            <li className="flex items-center gap-2"><CheckIcon className="w-4 h-4 text-red-500" /> 100 KC (~500 Chats)</li>
                             <li className="flex items-center gap-2"><CheckIcon className="w-4 h-4 text-red-500" /> Access To All Dictator</li>
                             <li className="flex items-center gap-2"><CheckIcon className="w-4 h-4 text-red-500" /> Contextual Conversation</li>
                             <li className="flex items-center gap-2"><CheckIcon className="w-4 h-4 text-red-500" /> Voice Responses</li>
@@ -157,25 +165,42 @@ const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ isOpen, onClose, 
                             <li className="flex items-center gap-2"><XCircleIcon className="w-4 h-4 text-red-900/40" /> No early Access(New Models)</li>
 
                         </ul>
-                        <button className="mt-auto w-full py-2 bg-red-700 hover:bg-red-600 text-white font-bold uppercase text-sm tracking-wider rounded-sm transition-colors border border-red-500">
-                            Enlist Now
-                        </button>
+                        {user?.subscription === 'infantry' ? (
+                            <div className="mt-auto text-xs text-green-500 font-bold uppercase tracking-widest flex items-center gap-2">
+                                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                                Current Status
+                            </div>
+                        ) : (
+                            <button className="mt-auto w-full py-2 bg-red-700 hover:bg-red-600 text-white font-bold uppercase text-sm tracking-wider rounded-sm transition-colors border border-red-500">
+                                Enlist Now
+                            </button>
+                        )}
                     </div>
 
                     {/* Commander Tier */}
-                    <div className="border border-amber-600/30 bg-amber-950/10 p-6 rounded-lg flex flex-col items-center text-center group hover:bg-amber-950/20 transition-all cursor-pointer" onClick={() => handleClick('commander')}>
-                        <div className="text-amber-500 font-bold uppercase mb-2 group-hover:text-amber-400">Commander</div>
+                    <div
+                        className={`border p-6 rounded-lg flex flex-col items-center text-center transition-all ${user?.subscription === 'commander' ? 'border-green-500/50 bg-green-950/10 ring-1 ring-green-500/20' : 'border-amber-600/30 bg-amber-950/10 hover:bg-amber-950/20 cursor-pointer group'}`}
+                        onClick={() => user?.subscription !== 'commander' && handleClick('commander')}
+                    >
+                        <div className={`font-bold uppercase mb-2 ${user?.subscription === 'commander' ? 'text-green-500' : 'text-amber-500 group-hover:text-amber-400'}`}>Commander</div>
                         <div className="text-3xl font-oswald text-white mb-4">$9.99<span className="text-sm text-zinc-500">/mo</span></div>
                         <ul className="text-sm text-zinc-300 space-y-2 mb-6 font-mono text-left w-full pl-4">
-                            <li className="flex items-center gap-2"><CheckIcon className="w-4 h-4 text-amber-500" /> 2000 KC (~10000 Chats)</li>
+                            <li className="flex items-center gap-2"><CheckIcon className="w-4 h-4 text-amber-500" /> 300 KC (~1500 Chats)</li>
                             <li className="flex items-center gap-2"><CheckIcon className="w-4 h-4 text-amber-500" /> Early Access (New Models)</li>
                             <li className="flex items-center gap-2"><CheckIcon className="w-4 h-4 text-amber-500" /> Contextual Conversation</li>
                             <li className="flex items-center gap-2"><CheckIcon className="w-4 h-4 text-amber-500" /> Voice Responses</li>
                             <li className="flex items-center gap-2"><CheckIcon className="w-4 h-4 text-amber-500" /> Avatar Response</li>
                         </ul>
-                        <button className="mt-auto w-full py-2 bg-amber-700 hover:bg-amber-600 text-white font-bold uppercase text-sm tracking-wider rounded-sm transition-colors border border-amber-500">
-                            Take Command
-                        </button>
+                        {user?.subscription === 'commander' ? (
+                            <div className="mt-auto text-xs text-green-500 font-bold uppercase tracking-widest flex items-center gap-2">
+                                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                                Current Status
+                            </div>
+                        ) : (
+                            <button className="mt-auto w-full py-2 bg-amber-700 hover:bg-amber-600 text-white font-bold uppercase text-sm tracking-wider rounded-sm transition-colors border border-amber-500">
+                                Take Command
+                            </button>
+                        )}
                     </div>
 
                 </div>
